@@ -1,3 +1,5 @@
+//thinkphp 网页认证类
+
 <?php
 namespace Mobile\Controller;
 use Think\Controller;
