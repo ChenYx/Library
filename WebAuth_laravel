@@ -1,0 +1,122 @@
+<?php
+namespace Mobile\Controller;
+use Think\Controller;
+
+class WxAuthController extends Controller
+{
+    protected $appid = '';
+    protected $secret = '';
+    protected $redirect_action = 'Activity/index';
+
+    public function __construct()
+    {
+        parent::__construct();
+        $state = I('get.state');
+        if (C($state.".appid") != '' && C($state.".secret") != ''){
+            $this->appid = C($state.".appid");
+            $this->secret = C($state.".secret");
+            $this->redirect_action = 'WxActivity/index';
+        }
+        session('state',$state);
+    }
+
+    public function auth()
+    {
+        $code = I('get.code', null);
+        if (empty($code)) {
+            $this->redirect($this->redirect_action);
+        }
+        $access_token = $this->access_token($code, $this->appid, $this->secret);
+        $user_info = $this->snsapi_userinfo($access_token, session('openid'));
+
+        $this->redirect($this->redirect_action);
+    }
+
+    private function access_token($code, $appid, $secret)
+    {
+        $access_token = session('access_token');
+        $result = '';
+        if (empty($access_token)) {
+            $url = 'https://api.weixin.qq.com/sns/oauth2/access_token';
+            $params = array(
+                'appid' => $appid,
+                'secret' => $secret,
+                'code' => $code,
+                'grant_type' => 'authorization_code'
+            );
+            $result = $this->http($url, $params);
+        } else {
+            $refresh_token = session('refresh_token');
+            $url = 'https://api.weixin.qq.com/sns/oauth2/refresh_token';
+            $params = array(
+                'appid' => $appid,
+                'refresh_token' => $refresh_token,
+                'grant_type' => 'refresh_token'
+            );
+            $result = $this->http($url, $params);
+        }
+        $result = json_decode($result, true);
+        session('access_token', $result['access_token']);
+        session('refresh_token', $result['refresh_token']);
+        session('openid', $result['openid']);
+        return $result['access_token'];
+    }
+
+    private function snsapi_userinfo($access_token, $openid) {
+        $url = 'https://api.weixin.qq.com/sns/userinfo';
+        $params = array(
+            'access_token' => $access_token,
+            'openid' => $openid
+        );
+        $result = $this->http($url, $params);
+        $result = json_decode($result, true);
+        session('wechat_name', $result['nickname']);
+        session('sex', $result['sex']);
+        session('city', $result['city']);
+        session('province', $result['province']);
+        session('subscribe',$result['subscribe']);
+        return $result;
+    }
+
+    /**
+     * 发送HTTP请求方法
+     * @param  string $url    请求URL
+     * @param  array  $params 请求参数
+     * @param  string $method 请求方法GET/POST
+     * @return array  $data   响应数据
+     */
+    private function http($url, $params, $method = 'GET', $header = array("Content-type: text/html; charset=utf-8"), $multi = false){
+        $opts = array(
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_RETURNTRANSFER => 1,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER     => $header
+        );
+        /* 根据请求类型设置特定参数 */
+        switch (strtoupper($method)) {
+        case 'GET':
+            $opts[CURLOPT_URL] = $url . '?' . http_build_query($params);
+            break;
+        case 'POST':
+            //判断是否传输文件
+            $params = $multi ? $params : http_build_query($params);
+            $opts[CURLOPT_URL] = $url;
+            $opts[CURLOPT_POST] = 1;
+            $opts[CURLOPT_POSTFIELDS] = $params;
+            break;
+        default:
+            return false;
+        }
+        /* 初始化并执行curl请求 */
+        $ch = curl_init();
+        curl_setopt_array($ch, $opts);
+        $data  = curl_exec($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($error) {
+            return false;
+        }
+        return  $data;
+    }
+}
